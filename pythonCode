@@ -1,0 +1,88 @@
+import cv2
+import pytesseract
+import serial
+import time
+import numpy as np
+
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+SERIAL_PORT = 'COM6'
+BAUD_RATE = 115200
+TIMEOUT = 1
+
+ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=TIMEOUT)
+time.sleep(2)
+print("Serial connected. Waiting for NodeMCU signal...")
+
+cam = cv2.VideoCapture(0)
+if not cam.isOpened():
+    print("Cannot access webcam.")
+    exit()
+
+print("Camera ready.")
+
+def ocr_plate(frame):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.medianBlur(gray, 5)
+    gray = cv2.equalizeHist(gray)
+    
+    edges = cv2.Canny(gray, 100, 200)
+    
+    contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    
+    plate_roi = None
+    max_area = 0
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.02 * cv2.arcLength(cnt, True), closed=True)
+        if len(approx) == 4:
+            area = cv2.contourArea(cnt)
+            if area > max_area:
+                max_area = area
+                plate_roi = approx
+    
+    if plate_roi is not None:
+        x, y, w, h = cv2.boundingRect(plate_roi)
+        plate_img = gray[y:y+h, x:x+w]
+    else:
+        plate_img = gray
+    
+    gray_resized = cv2.resize(plate_img, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
+    
+    kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
+    gray_resized = cv2.filter2D(gray_resized, -1, kernel)
+    
+    thresh = cv2.threshold(gray_resized, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    
+    config_psm8 = r'--oem 3 --psm 8 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-'
+    config_psm7 = r'--oem 3 --psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-'
+    
+    text1 = pytesseract.image_to_string(gray_resized, config=config_psm8)
+    text2 = pytesseract.image_to_string(thresh, config=config_psm8)
+    text3 = pytesseract.image_to_string(gray_resized, config=config_psm7)
+    text4 = pytesseract.image_to_string(thresh, config=config_psm7)
+    
+    all_texts = [text1, text2, text3, text4]
+    valid_texts = [t.strip().replace("\n", " ") for t in all_texts if t.strip()]
+    
+    if valid_texts:
+        return max(valid_texts, key=len)
+    else:
+        return "NoPlateFound"
+
+while True:
+    if ser.in_waiting > 0:
+        msg = ser.readline().decode('utf-8', errors='ignore').strip()
+        if msg == "CAPTURE":
+            print("Trigger received, capturing image...")
+
+            ret, frame = cam.read()
+            if not ret:
+                print("Camera error")
+                ser.write(b"NoPlateFound\n")
+                continue
+
+            cv2.imwrite("capture.jpg", frame)
+            plate_text = ocr_plate(frame)
+
+            print(f"Detected Plate: {plate_text}")
+            ser.write((plate_text + "\n").encode())
