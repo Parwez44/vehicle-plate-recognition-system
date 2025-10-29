@@ -1,0 +1,74 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+#define TRIGGER_BUTTON 0
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(TRIGGER_BUTTON, INPUT);
+  
+  delay(2000);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("OLED initialization failed!");
+    for (;;);
+  }
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(10, 20);
+  display.println("Vehicle Plate OCR");
+  display.setCursor(10, 35);
+  display.println("Press Button...");
+  display.display();
+  
+  Serial.println("System Ready - Waiting for button press...");
+}
+
+void loop() {
+  if (digitalRead(TRIGGER_BUTTON) == HIGH) {
+    Serial.println("CAPTURE");
+    display.clearDisplay();
+    display.setCursor(10, 20);
+    display.println("Capturing...");
+    display.display();
+    delay(1000);
+  }
+  
+  if (Serial.available()) {
+    String plate = Serial.readStringUntil('\n');
+    plate.trim();
+
+    if (plate.length() > 0) {
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      
+      display.setCursor(10, 10);
+      display.println("Detected Plate:");
+      
+      display.setTextSize(2);
+      display.setCursor(10, 30);
+      display.println(plate);
+      
+      display.display();
+      Serial.println("Displayed: " + plate);
+      delay(3000);
+      
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setCursor(10, 20);
+      display.println("Vehicle Plate OCR");
+      display.setCursor(10, 35);
+      display.println("Press Button...");
+      display.display();
+    }
+  }
+}
